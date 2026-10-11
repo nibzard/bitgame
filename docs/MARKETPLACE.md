@@ -1,69 +1,34 @@
-# Local marketplace on meshkit
+# Marketplace: deferred exploration
 
-The marketplace is not a separate system. It is an app that composes
-platform primitives that already ship in BitChat.
+The marketplace is outside the current product scope. The first product
+is one cooperative game for two or three nearby people.
 
-## Primitive mapping
+## Why it is deferred
 
-| Need | Primitive | BitChat source |
-|---|---|---|
-| Listing | Signed geohash board post (7-day expiry, tombstones) | `boardPost` 0x23, `BoardPackets.swift` |
-| Presence | Geohash channels and heartbeats | Nostr kinds 20000/20001 |
-| Reputation | Vouch attestations, web of trust | `VouchAttestation.swift` |
-| Payment | Cashu ecash token in a directed event | `CashuTokenDecoder.swift` |
-| Escrow | Mutually vouched third peer holds the token | courier pattern |
-| Dispute | Board tombstone plus vouch withdrawal | boards + vouches |
+A marketplace needs discovery, inventory ownership, competing-order rules,
+payment, and dispute handling. Intermittent connections make shared state
+harder to maintain. Escrow introduces a trusted person and an operational
+role that a game does not require.
 
-## Trade flow (as the market-sim app runs it)
+A working transport does not establish these rules. The game should first
+show that nearby groups can join, recover from disconnection, and finish
+something they value.
 
-```
-seller            buyer             escrow agent        mesh
-  |                 |                    |               |
-  |-- LIST ------ broadcast ----------->|--------------->|  listing visible
-  |                 |                    |               |
-  |                 |<------ geohash board / channel ---- |
-  |                 |                    |               |
-  |<---------- BUY (order) ------------>|--------------->|  order created
-  |                 |                    |               |
-  |                 |== cashu token == hands agent =====>|  off-mesh or DM
-  |                 |                    |               |
-  |                 |-- HOLD --------- broadcast ------->|  token held, order held
-  |                 |                    |               |
-  |                 |<===== goods delivered =============|  physical handover
-  |                 |                    |               |
-  |                 |-- RELEASE ------ broadcast ------->|  token released to seller
-  |                 |                    |               |
-  |                 |   reputation: agent +1 on delivered, -1 on refunded
-```
+## Existing simulation
 
-Every event is an appEvent (0x2D) with a (seq, sender) key; every replica
-applies the same order and computes the same state root. The escrow agent
-is any peer both sides vouched for; their incentive is the reputation
-delta, which the ledger itself tracks.
+`reference/apps/market_sim/` remains an earlier experiment. It demonstrates
+listings, purchases, holds, releases, and reputation counters in a scripted
+scenario. It does not implement payment verification or agreed escrow
+appointment. Different arrival orders can produce different final states.
 
-## The double-spend problem, stated plainly
+Do not use this simulation to manage real trades or infer settlement guarantees.
+The passing tests cover the scripted behavior, not a complete marketplace.
 
-Offline Cashu is bearer ecash. A buyer can hand the same token to two
-sellers; only the mint can detect the second spend. No mesh protocol
-removes this without a mint. Mitigations, in the order the platform
-applies them:
+## Conditions for revisiting
 
-1. **Amount caps tied to reputation.** A new buyer trades small amounts
-   until vouches accumulate.
-2. **Escrow settlement.** The agent verifies the token when any link to
-   the internet exists (one peer online is enough) before RELEASE.
-3. **Mint verification when reachable.** Nostr bridges make mints
-   reachable over Tor; the envelope format already exists.
-4. **Local knowledge.** The strongest offline trust signal is physical:
-   you can find the seller. Geohash presence is the trust anchor.
+Revisit this direction only after identifying a specific local trading need.
+Start with discovery and direct communication. Treat inventory, payment,
+and disputes as separate product decisions with explicit authority rules.
 
-The platform claims eventual, reputation-weighted settlement — not
-cryptographic double-spend prevention. Apps that need the latter must wait
-for a mint round trip.
-
-## Catalog
-
-Apps themselves distribute the same way: a manifest board post
-(`meshapp:` prefix, see `docs/WIRE.md`), fetch by content hash, verify,
-install. A marketplace of apps and a marketplace of goods share one
-mechanism.
+A game library or transport adapter may help later. Neither requires an
+app marketplace, reputation system, or payment layer now.

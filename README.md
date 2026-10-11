@@ -1,70 +1,71 @@
 # bitgame
 
-A constrained app platform on the BitChat mesh: games, marketplaces, and
-tools that run peer-to-peer over Bluetooth, with no servers and no
-accounts. BitChat phones in radio range relay platform traffic unchanged.
+A small cooperative game for two or three people nearby. Players join a
+shared session over Bluetooth, without an internet connection or accounts.
+One player's phone coordinates the session.
 
-The primitive: deterministic apps on a delay-tolerant local mesh with
-bearer payments. Read `SPEC.md` first — it is the contract everything
-else implements.
+The first goal is simple: people can start a game, finish it together, and
+want to play again. The game rules are still to be chosen.
+
+## Product scope
+
+- One game shipped with the host application.
+- Two or three players who deliberately join the same session.
+- One coordinator that validates moves and publishes the shared state.
+- Reconnection after a player briefly loses contact.
+- A clear pause when the coordinator is unavailable.
+
+BitChat is the proposed transport. Direct nearby connections are the first
+integration target. Relay support must be verified on actual devices before
+it becomes a product promise.
 
 ## Status
 
-Walking skeleton, spec-first. What exists:
+Design reset. The repository contains an earlier platform experiment,
+not an implementation of the game described above.
 
-- `SPEC.md` — the platform contract: wire registry, event format,
-  ordering, budgets, manifests, runtime.
-- `ARCHITECTURE.md` — layering, the porting map from BitChat, roadmap.
-- `reference/` — a runnable Python implementation of the platform core:
-  wire codec (ported byte-for-byte from `BinaryProtocol.swift`), relay
-  policy, ordering buffer, budget metering, manifest validation,
-  deterministic app host.
-- `reference/apps/market_sim/` — the first vertical: a marketplace
-  trading sim that exercises listings, orders, escrow, reputation, and
-  settlement.
-- `reference/sim/mesh_sim.py` — a three-node mesh demo.
-- `tests/` — 49 tests covering wire bytes, relay policy, budgets,
-  determinism, idempotency, and the market core.
+- `SPEC.md` defines the proposed game session contract.
+- `ARCHITECTURE.md` describes the implementation plan and its limits.
+- `docs/APP-MODEL.md` describes the proposed game interface.
+- `docs/WIRE.md` records the existing codec and transport questions.
+- `docs/MARKETPLACE.md` explains why the marketplace is deferred.
+- `reference/` contains the earlier Python platform and market simulation.
+- `tests/` exercises that experiment. It does not establish conformance
+  with the new session contract.
 
-## Quickstart
+The existing ordering buffer does not guarantee replica convergence.
+The experiment also has known gaps in admission limits, event retention,
+and input validation. It is useful for investigation, not session authority.
+
+## Run the existing experiment
+
+From the repository root:
 
 ```bash
-# run the mesh demo (from reference/)
-cd reference && python3 sim/mesh_sim.py
-
-# run the test suite (from the repo root)
+python3 reference/sim/mesh_sim.py
 python3 -m unittest discover -s tests -t .
 ```
 
-## The demo shows
+The demo runs a scripted marketplace exchange. Matching state hashes in
+that scenario do not prove convergence under arbitrary delivery orders.
 
-1. Capability bit 11 (`meshapps`) advertisement.
-2. A full marketplace round trip: LIST → BUY → HOLD → RELEASE.
-3. Mesh-level dedup of a reinjected packet.
-4. Host-level idempotency: a redelivered event changes no state root.
-5. Causal ordering: an early RELEASE buffers until its HOLD applies.
-6. Budget enforcement: burst sends are refused before transmit.
-7. Convergence: all three nodes reach the same state root.
+## First milestone
 
-## Key decisions
+Choose one cooperative game whose moves fit in small messages. Build a
+complete session for two or three players. Verify joining, playing,
+reconnecting, and finishing on real phones without internet access.
 
-- Wire type `0x2D` (`appEvent`) and capability bit 11 are the only new
-  values; deployed BitChat relays forward them unchanged.
-- Apply order is `(seq, sender)` — a per-sender contiguous counter with a
-  deterministic tie-break. Convergence needs no coordination;
-  cross-sender causality is not guaranteed (SPEC 5.4), so apps write
-  order-tolerant handlers.
-- Budgets are enforced, not requested: decode-time caps plus host-time
-  token buckets per app.
-- Apps are signed manifests plus content-addressed modules; the compute
-  target is WASM, and the reference runtime implements the same ABI in
-  Python (`docs/APP-MODEL.md`).
-- The marketplace composes existing BitChat primitives: boards for
-  listings, vouches for reputation, Cashu tokens for payment, a vouched
-  third peer for escrow (`docs/MARKETPLACE.md`). Offline double-spend is
-  not solved and is not claimed to be.
+Measure whether groups finish and choose to play again. Record setup time,
+failed joins, and recovery after disconnection. Set success thresholds
+before the playtest.
+
+## Later decisions
+
+Extract a reusable library when a second game needs the same capabilities.
+Consider third-party modules only after there is evidence that authors and
+players need them. Payments, escrow, reputation, and an app marketplace are
+outside the first release.
 
 ## License
 
-Reference code follows the BitChat tree it ports: public domain
-(Unlicense). See `LICENSE`.
+The reference code uses the Unlicense. See `LICENSE`.

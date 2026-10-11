@@ -1,102 +1,95 @@
-# meshkit architecture
+# bitgame architecture
 
-## Layering
+## Design target
 
-```
-┌──────────────────────────────────────────────────────────┐
-│ host apps: chat (BitChat), games, marketplace, tools     │
-├──────────────────────────────────────────────────────────┤
-│ runtime: WASM host, metering, manifest, catalog          │  new
-├──────────────────────────────────────────────────────────┤
-│ value: cashu send/settle, escrow, reputation (vouches)   │  partial
-├──────────────────────────────────────────────────────────┤
-│ social: boards, presence, geohash channels               │  exists
-├──────────────────────────────────────────────────────────┤
-│ dtn: outbox, couriers, gossip sync, nostr bridge         │  exists
-├──────────────────────────────────────────────────────────┤
-│ sessions: noise XX, groups, prekeys                      │  exists
-├──────────────────────────────────────────────────────────┤
-│ identity: keys, fingerprints, announces, verification    │  exists
-├──────────────────────────────────────────────────────────┤
-│ wire: binary protocol, packets, TLV, caps, limits        │  exists (BitFoundation)
-├──────────────────────────────────────────────────────────┤
-│ transport: BLE link layer, flood control, fragmentation  │  exists (BLEService)
-└──────────────────────────────────────────────────────────┘
+Build one nearby cooperative game with one session coordinator. Keep game
+rules separate from session recovery and Bluetooth transport.
+
+```text
+Game screen
+    |
+Session client: join, submit, reconnect, display committed state
+    |
+Session protocol: authentication, revisions, retries, snapshots
+    |
+Transport adapter: nearby links and verified BitChat integration
 ```
 
-"Exists" means working Swift in the BitChat tree. The platform work is
-extraction plus the two new layers on top.
+The coordinator also runs the game rules and owns the accepted move log.
+Each participant keeps a local copy of committed state for display.
 
-## Porting map
+## Authority and state
 
-| meshkit layer | BitChat source | Reference port |
-|---|---|---|
-| wire | `BitFoundation/BinaryProtocol.swift`, `PacketPayloadLimits.swift`, `MessageType.swift`, `PeerCapabilities.swift` | `reference/meshkit/wire.py` |
-| transport policy | `RelayController.swift`, `BLEReceivePipeline.swift` | `reference/meshkit/relay.py` |
-| event codec | new (SPEC 4.1) | `reference/meshkit/events.py` |
-| ordering | new (SPEC 5) | `reference/meshkit/ordering.py` |
-| budgets | new, pattern from decode-time caps | `reference/meshkit/budgets.py` |
-| runtime | new (SPEC 8) | `reference/runtime/host.py` |
-| manifests | new (SPEC 7) | `reference/runtime/manifest.py` |
-| first app | new | `reference/apps/market_sim/` |
+The coordinator serializes requests, validates moves, and assigns revisions.
+A participant never commits its own move before acceptance. A missing
+revision triggers recovery; elapsed time does not make it safe to skip.
 
-The Python tree is a runnable specification, not the shipping code. Swift
-(and Kotlin for Android parity) implementations must match its byte-level
-behavior; the test suite in `tests/` is the conformance bar.
+Keep a bounded commit log for short disconnections. Use a complete snapshot
+when the requested history is no longer available. Keep move results for
+the session so retries cannot apply twice.
 
-## What the reference implementation proves today
+The first release keeps session state in memory. Coordinator process loss
+ends the session. Persistent recovery and authority transfer require a
+separate design if playtests show that they are necessary.
 
-Run `python3 sim/mesh_sim.py` from `reference/`:
+## Game code
 
-1. `0x2D` packets encode and decode byte-compatible with the BitChat
-   format (v1 and v2 headers, compression, padding, signature coverage).
-2. Relay policy treats app events as broadcasts; dedup drops reinjected
-   copies at mesh level.
-3. Host-level idempotency: a redelivered event changes no state root.
-4. Ordering: an event that arrives before its predecessor is buffered and
-   applied in (seq, sender) order.
-5. Budgets: a spammy app is refused before transmit.
-6. Convergence: three replicas apply the same eight events and reach
-   identical state roots.
+Ship one game inside the host application. Use ordinary functions for
+validation, state transitions, and rendering. There is no third-party
+module loader or WebAssembly runtime in the first release.
 
-## Design decisions worth remembering
+Choose the game before implementing its rules. Prefer a short cooperative
+activity that works with two players and becomes more interesting with three.
+Small discrete moves make recovery and mobile interaction easier to inspect.
 
-- **Ordering key is (seq, sender), not a lamport clock.** Lamport counters
-  merge on receive, which makes them non-contiguous; gap-buffered delivery
-  would stall. A per-sender contiguous seq plus a deterministic tie-break
-  gives convergence with no coordination. Trade-off: cross-sender
-  causality is not guaranteed — apps write order-tolerant reduce (SPEC
-  5.4); market-sim demonstrates the pending-replay pattern.
-- **Ledger apps broadcast; games may go directed.** Any event that feeds
-  shared state must reach every replica. Directed events suit 1:1
-  sessions and relay deterministically.
-- **Budgets live at two points.** Decode-time hard caps (inherited,
-  per type) and host-time per-app metering (token bucket). A manifest
-  over platform maxima fails install, not runtime.
-- **Origins apply their own events.** Without loopback application,
-  senders diverge from replicas immediately.
+## Transport boundary
 
-## Roadmap
+The session layer needs peer discovery, authenticated connections, bounded
+message delivery, and connection status. It assumes messages can be lost,
+duplicated, delayed, or reordered.
 
-0. **Done — spec and skeleton.** SPEC, reference implementation, tests,
-   market-sim demo.
-1. **Swift MeshKit extraction.** Move BitFoundation plus a transport
-   facade into a reusable package; port the reference tests.
-2. **WASM runtime.** `wasmi`/`wasm3` host, the ABI in
-   `docs/APP-MODEL.md`, tick metering.
-3. **Catalog and install.** `meshapp:` board posts, content-addressed
-   fetch, signature verification, permission UI.
-4. **Value.** Cashu send flow in directed events; escrow agent role;
-   vouch aggregation.
-5. **Android parity.** Kotlin wire layer against the same test vectors.
+BitChat is the proposed integration, not a verified dependency contract.
+Pin an upstream revision and test behavior on devices before claiming wire
+compatibility. Verify unknown message handling, recipient routing,
+authentication, payload limits, and background operation.
 
-## Risks carried forward
+Start with direct nearby connections. Add relay support only when a measured
+play scenario needs it and the transport can support recovery.
 
-- Battery: every relayed byte spends a stranger's battery. Metering is a
-  platform duty, not an app courtesy.
-- The 6-hour gossip window fits chat, not a catalog; distribution needs a
-  longer-retention blob class.
-- Malware: signatures prove authorship, not safety. Vouch-weighted
-  install warnings are the decentralized answer.
-- Namespace governance: type values and capability bits need a registry
-  (SPEC 3) that forks actually consult.
+## Existing experiment
+
+| Path | Current role |
+|---|---|
+| `reference/meshkit/wire.py` | Candidate packet codec; needs upstream comparison |
+| `reference/meshkit/relay.py` | Relay policy experiment |
+| `reference/meshkit/events.py` | Earlier application envelope |
+| `reference/meshkit/ordering.py` | Earlier ordering experiment; does not establish convergence |
+| `reference/meshkit/budgets.py` | Outbound metering experiment |
+| `reference/runtime/` | Earlier manifest and host experiment |
+| `reference/apps/market_sim/` | Historical marketplace simulation |
+| `reference/sim/mesh_sim.py` | Scripted demonstration of that simulation |
+| `tests/` | Tests for the earlier experiment |
+
+Preserve these files as research material during the design reset. Reuse
+code only after testing it against the new contract. The existing passing
+tests do not establish delivery, authorization, or convergence guarantees.
+
+## Implementation sequence
+
+1. Choose the game and write one complete session scenario.
+2. Implement its rules and coordinator in a local simulation.
+3. Add move results, revisions, replay, and snapshot recovery.
+4. Inject loss, duplicates, reordering, and participant disconnections.
+5. Integrate authenticated nearby transport on real phones.
+6. Run complete sessions with two or three people and measure failures.
+7. Decide whether the experience merits another iteration.
+
+Before playtesting, set thresholds for completion, setup time, and recovery.
+Ask players whether they want another session. That evidence decides the
+next product investment.
+
+## Future extraction
+
+A second useful game can reveal which session capabilities belong in a
+shared library. Third-party hosting needs separate evidence of demand and
+its own security model. Marketplace and payment work remain deferred.
