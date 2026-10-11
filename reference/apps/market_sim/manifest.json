@@ -1,0 +1,23 @@
+{
+  "manifestVersion": 1,
+  "appId": "im.bitgame.market-sim",
+  "version": "0.1.0",
+  "name": "Mesh Market Sim",
+  "description": "Local marketplace trading sim: listings, orders, escrow, vouches",
+  "entry": "core.wasm",
+  "moduleHash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "signer": "ed25519:0000000000000000000000000000000000000000000000000000000000000000",
+  "budget": {
+    "bytesPerSecond": 300,
+    "burstBytes": 1024,
+    "broadcastEventsPerSecond": 2,
+    "maxEventBytes": 200,
+    "stateBytes": 16384
+  },
+  "permissions": [
+    "mesh.broadcast",
+    "mesh.direct",
+    "state.persist",
+    "value.cashu.receive"
+  ]
+}
